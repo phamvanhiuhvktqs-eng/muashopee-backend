@@ -1,55 +1,134 @@
-from flask import Flask, request, jsonify, redirect
+from flask import Flask, request, jsonify, render_template_string
 from flask_cors import CORS
 import urllib.parse
-import os
 
 app = Flask(__name__)
+CORS(app)
 
-# CORS chuẩn cho Firebase web.app
-CORS(app, resources={r"/*": {"origins": "*"}})
+AFFILIATE_ID = "17313960485"
+SUB_ID = "muashopee"
 
-AFFILIATE_LINK = "https://s.shopee.vn/6KyNy3OYeP"
+# =========================
+# FRONTEND (HTML + JS)
+# =========================
+HTML_PAGE = """
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <title>Chuyển link Shopee Affiliate</title>
+  <style>
+    body { font-family: Arial; max-width: 600px; margin: 40px auto; }
+    input, button { width: 100%; padding: 10px; margin-top: 10px; }
+    button { cursor: pointer; }
+    .note { color: #666; font-size: 14px; margin-top: 10px; }
+  </style>
+</head>
+<body>
+  <h2>Chuyển link Shopee → Affiliate</h2>
 
-# ✅ Route test bắt buộc
+  <input id="inputUrl" placeholder="Dán link Shopee (vn.shp.ee / s.shopee.vn / shopee.vn)" />
+  <button onclick="handleConvert()">Chuyển link</button>
+
+  <p class="note">
+    ⚠️ Link sẽ được xử lý bằng trình duyệt để tránh lỗi 403.
+  </p>
+
+<script>
+async function resolveFinalUrl(url) {
+  return new Promise((resolve, reject) => {
+    const iframe = document.createElement("iframe");
+    iframe.style.display = "none";
+    iframe.src = url;
+
+    iframe.onload = () => {
+      try {
+        const finalUrl = iframe.contentWindow.location.href;
+        document.body.removeChild(iframe);
+        resolve(finalUrl);
+      } catch (e) {
+        document.body.removeChild(iframe);
+        reject("Không resolve được link");
+      }
+    };
+
+    document.body.appendChild(iframe);
+  });
+}
+
+async function handleConvert() {
+  const input = document.getElementById("inputUrl").value.trim();
+  if (!input) {
+    alert("Vui lòng nhập link");
+    return;
+  }
+
+  try {
+    // BƯỚC 1: resolve link bằng TRÌNH DUYỆT
+    const finalUrl = await resolveFinalUrl(input);
+
+    if (!finalUrl.startsWith("https://shopee.vn/")) {
+      alert("Link sau resolve không phải shopee.vn");
+      return;
+    }
+
+    // BƯỚC 2: gửi link ĐÍCH về backend
+    const res = await fetch("/convert", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url: finalUrl })
+    });
+
+    const data = await res.json();
+    if (!data.affiliate_url) {
+      alert("Lỗi tạo link");
+      return;
+    }
+
+    // BƯỚC 3: redirect TRỰC TIẾP (KHÔNG fetch)
+    window.location.href = data.affiliate_url;
+
+  } catch (err) {
+    alert("Không xử lý được link");
+  }
+}
+</script>
+</body>
+</html>
+"""
+
 @app.route("/")
-def home():
-    return jsonify({
-        "status": "ok",
-        "service": "muashopee-backend-railway"
-    })
+def index():
+    return render_template_string(HTML_PAGE)
 
-# ✅ API convert
+# =========================
+# BACKEND – CHỈ GẮN AFF
+# =========================
 @app.route("/convert", methods=["POST"])
 def convert():
-    data = request.get_json(silent=True)
+    data = request.get_json()
     if not data or "url" not in data:
         return jsonify({"error": "Missing URL"}), 400
 
-    original_url = data["url"]
-    encoded = urllib.parse.quote(original_url, safe="")
+    final_url = data["url"].strip()
 
-    # ✅ Tự động lấy domain hiện tại (Railway)
-    base_url = request.host_url.rstrip("/")
-    final_link = f"{base_url}/go?target={encoded}"
+    # CHỈ CHẤP NHẬN LINK SHOPEE ĐÍCH
+    if not final_url.startswith("https://shopee.vn/"):
+        return jsonify({"error": "Invalid final Shopee URL"}), 400
+
+    # Encode CHUẨN – KHÔNG encode 2 lần
+    encoded_url = urllib.parse.quote(final_url, safe=":/?=&")
+
+    affiliate_link = (
+        "https://s.shopee.vn/an_redir"
+        f"?origin_link={encoded_url}"
+        f"&affiliate_id={AFFILIATE_ID}"
+        f"&sub_id={SUB_ID}"
+    )
 
     return jsonify({
-        "affiliate_url": final_link
+        "affiliate_url": affiliate_link
     })
 
-# ✅ Redirect + gắn affiliate
-@app.route("/go")
-def go():
-    target = request.args.get("target")
-    if not target:
-        return jsonify({"error": "Missing target"}), 400
-
-    response = redirect(AFFILIATE_LINK, code=302)
-
-    # Shopee sẽ redirect tiếp sau 1s
-    response.headers["Refresh"] = f"1; url={target}"
-    return response
-
-
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 8000))
-    app.run(host="0.0.0.0", port=port)
+    app.run(host="0.0.0.0", port=5000, debug=True)
