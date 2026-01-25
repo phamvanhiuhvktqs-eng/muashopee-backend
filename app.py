@@ -1,6 +1,5 @@
 from flask import Flask, request, jsonify
 import urllib.parse
-import requests
 import os
 
 app = Flask(__name__)
@@ -10,7 +9,7 @@ SUB_ID = "muashopee"
 
 @app.route("/convert", methods=["POST"])
 def convert():
-    data = request.get_json()
+    data = request.get_json() or {}
     raw_url = data.get("url", "").strip()
 
     if not raw_url:
@@ -18,33 +17,17 @@ def convert():
 
     encoded = urllib.parse.quote(raw_url, safe="")
 
-    an_redir = (
+    affiliate_link = (
         "https://s.shopee.vn/an_redir"
         f"?origin_link={encoded}"
         f"&affiliate_id={AFFILIATE_ID}"
         f"&sub_id={SUB_ID}"
     )
 
-    # 🔥 BẮT BUỘC: gọi Shopee để nó tạo short link mới
-    r = requests.get(
-        an_redir,
-        headers={
-            "User-Agent": "Mozilla/5.0",
-            "Accept": "*/*"
-        },
-        allow_redirects=False,
-        timeout=10
-    )
-
-    # ƯU TIÊN Location (302)
-    short_link = r.headers.get("Location")
-
-    # Fallback: nếu Shopee không trả Location
-    if not short_link:
-        short_link = an_redir
-
+    # ⚠️ KHÔNG gọi Shopee
+    # ⚠️ KHÔNG decode
     return jsonify({
-        "affiliate_url": short_link
+        "affiliate_url": affiliate_link
     })
 
 @app.route("/")
