@@ -1,38 +1,52 @@
 from flask import Flask, request, jsonify
+from flask_cors import CORS
 import urllib.parse
 import os
 
 app = Flask(__name__)
+CORS(app)
 
+# Affiliate ID của bạn
 AFFILIATE_ID = "17313960485"
 SUB_ID = "muashopee"
 
+@app.route("/", methods=["GET"])
+def health():
+    return jsonify({"status": "ok"})
+
 @app.route("/convert", methods=["POST"])
 def convert():
-    data = request.get_json() or {}
-    raw_url = data.get("url", "").strip()
+    data = request.get_json(silent=True) or {}
+    shopee_url = data.get("url", "").strip()
 
-    if not raw_url:
-        return jsonify({"error": "Missing url"}), 400
+    if not shopee_url:
+        return jsonify({"error": "Missing Shopee URL"}), 400
 
-    encoded = urllib.parse.quote(raw_url, safe="")
+    # ⚠️ CHUẨN SHOPEE: CHỈ CHẤP NHẬN LINK shopee.vn
+    if "shopee.vn" not in shopee_url:
+        return jsonify({
+            "error": "Shopee chỉ hỗ trợ link gốc dạng https://shopee.vn/..."
+        }), 400
 
+    # BƯỚC 2: URL ENCODE LINK ĐÍCH
+    encoded_url = urllib.parse.quote(shopee_url, safe="")
+
+    # BƯỚC 3 + 4: TẠO LINK AFFILIATE THEO SHOPEE
     affiliate_link = (
         "https://s.shopee.vn/an_redir"
-        f"?origin_link={encoded}"
-        f"&affiliate_id={AFFILIATE_ID}"
-        f"&sub_id={SUB_ID}"
+        "?origin_link=" + encoded_url +
+        "&affiliate_id=" + AFFILIATE_ID +
+        "&sub_id=" + SUB_ID
     )
 
     # ⚠️ KHÔNG gọi Shopee
     # ⚠️ KHÔNG decode
+    # ⚠️ KHÔNG tạo short link
+    # → Trả đúng link Shopee hướng dẫn
+
     return jsonify({
         "affiliate_url": affiliate_link
     })
-
-@app.route("/")
-def health():
-    return {"status": "ok"}
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
