@@ -1,9 +1,15 @@
 from flask import Flask, request, jsonify, redirect
 import requests
 import re
-from urllib.parse import urlparse, unquote
+from urllib.parse import urlparse, unquote, quote
 
 app = Flask(__name__)
+
+# ===============================
+# CẤU HÌNH AFFILIATE (CỦA BẠN)
+# ===============================
+AFFILIATE_ID = "17313960485"
+SUB_ID = "muasamshopee"
 
 # ===============================
 # FOLLOW REDIRECT (shp.ee)
@@ -54,17 +60,29 @@ def normalize_shopee_link(input_url: str) -> str:
         shop_id, item_id = m.groups()
         return f"https://shopee.vn/product/{shop_id}/{item_id}"
 
-    # CASE 3: link app có smtt / utm → bỏ query xử lại
+    # CASE 3: link app có query → bỏ query xử lại
     if parsed.query:
         clean_url = parsed.scheme + "://" + parsed.netloc + parsed.path
         return normalize_shopee_link(clean_url)
 
-    # KHÔNG PHẢI LINK SẢN PHẨM
     raise ValueError("Không phải link sản phẩm Shopee hợp lệ")
 
 
 # ===============================
-# API TEST
+# TẠO LINK AFFILIATE HỢP LỆ
+# ===============================
+def build_affiliate_link(product_url: str) -> str:
+    encoded_origin = quote(product_url, safe="")
+    return (
+        "https://s.shopee.vn/an_redir"
+        f"?affiliate_id={AFFILIATE_ID}"
+        f"&sub_id={SUB_ID}"
+        f"&origin_link={encoded_origin}"
+    )
+
+
+# ===============================
+# API TEST CHUẨN HÓA
 # ===============================
 @app.route("/normalize")
 def normalize():
@@ -83,7 +101,24 @@ def normalize():
 
 
 # ===============================
-# CHẠY APP
+# API REDIRECT AFFILIATE (DÙNG CHÍNH)
+# ===============================
+@app.route("/go")
+def go():
+    link = request.args.get("url", "")
+    try:
+        normalized = normalize_shopee_link(link)
+        aff_link = build_affiliate_link(normalized)
+        return redirect(aff_link, code=302)
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 400
+
+
+# ===============================
+# CHẠY SERVER
 # ===============================
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8080, debug=True)
