@@ -1,53 +1,89 @@
-from flask import Flask, request, jsonify
-from flask_cors import CORS
-import urllib.parse
-import os
+from flask import Flask, request, jsonify, redirect
+import requests
+import re
+from urllib.parse import urlparse, unquote
 
 app = Flask(__name__)
-CORS(app)
 
-# Affiliate ID của bạn
-AFFILIATE_ID = "17313960485"
-SUB_ID = "muashopee"
+# ===============================
+# FOLLOW REDIRECT (shp.ee)
+# ===============================
+def resolve_redirect(url):
+    try:
+        for _ in range(5):
+            r = requests.head(url, allow_redirects=False, timeout=5)
+            if "Location" not in r.headers:
+                break
+            url = r.headers["Location"]
+        return url
+    except:
+        return url
 
-@app.route("/", methods=["GET"])
-def health():
-    return jsonify({"status": "ok"})
 
-@app.route("/convert", methods=["POST"])
-def convert():
-    data = request.get_json(silent=True) or {}
-    shopee_url = data.get("url", "").strip()
+# ===============================
+# CHUẨN HÓA LINK SHOPEE
+# ===============================
+def normalize_shopee_link(input_url: str) -> str:
+    if not input_url:
+        raise ValueError("Link rỗng")
 
-    if not shopee_url:
-        return jsonify({"error": "Missing Shopee URL"}), 400
+    url = input_url.strip()
 
-    # ⚠️ CHUẨN SHOPEE: CHỈ CHẤP NHẬN LINK shopee.vn
-    if "shopee.vn" not in shopee_url:
+    # decode nếu bị encode
+    try:
+        url = unquote(url)
+    except:
+        pass
+
+    # link rút gọn
+    if "shp.ee" in url:
+        url = resolve_redirect(url)
+
+    parsed = urlparse(url)
+    path = parsed.path
+
+    # CASE 1: /product/SHOP_ID/ITEM_ID
+    m = re.search(r"/product/(\d+)/(\d+)", path)
+    if m:
+        shop_id, item_id = m.groups()
+        return f"https://shopee.vn/product/{shop_id}/{item_id}"
+
+    # CASE 2: /i.SHOP_ID.ITEM_ID
+    m = re.search(r"/i\.(\d+)\.(\d+)", path)
+    if m:
+        shop_id, item_id = m.groups()
+        return f"https://shopee.vn/product/{shop_id}/{item_id}"
+
+    # CASE 3: link app có smtt / utm → bỏ query xử lại
+    if parsed.query:
+        clean_url = parsed.scheme + "://" + parsed.netloc + parsed.path
+        return normalize_shopee_link(clean_url)
+
+    # KHÔNG PHẢI LINK SẢN PHẨM
+    raise ValueError("Không phải link sản phẩm Shopee hợp lệ")
+
+
+# ===============================
+# API TEST
+# ===============================
+@app.route("/normalize")
+def normalize():
+    link = request.args.get("url", "")
+    try:
+        normalized = normalize_shopee_link(link)
         return jsonify({
-            "error": "Shopee chỉ hỗ trợ link gốc dạng https://shopee.vn/..."
+            "success": True,
+            "normalized": normalized
+        })
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": str(e)
         }), 400
 
-    # BƯỚC 2: URL ENCODE LINK ĐÍCH
-    encoded_url = urllib.parse.quote(shopee_url, safe="")
 
-    # BƯỚC 3 + 4: TẠO LINK AFFILIATE THEO SHOPEE
-    affiliate_link = (
-        "https://s.shopee.vn/an_redir"
-        "?origin_link=" + encoded_url +
-        "&affiliate_id=" + AFFILIATE_ID +
-        "&sub_id=" + SUB_ID
-    )
-
-    # ⚠️ KHÔNG gọi Shopee
-    # ⚠️ KHÔNG decode
-    # ⚠️ KHÔNG tạo short link
-    # → Trả đúng link Shopee hướng dẫn
-
-    return jsonify({
-        "affiliate_url": affiliate_link
-    })
-
+# ===============================
+# CHẠY APP
+# ===============================
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
+    app.run(host="0.0.0.0", port=8080, debug=True)
